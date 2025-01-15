@@ -1,4 +1,6 @@
 import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"  # 隐藏Pygame欢迎信息
+os.environ['SDL_AUDIODRIVER'] = 'dummy'  # 禁用音频
 import sys
 import random
 
@@ -10,17 +12,28 @@ from pygame import mixer
 
 class SnakeGame:
     def __init__(self, seed=0, board_size=12, silent_mode=True):
+        """
+        Initializes the Snake game environment.
+
+        :param seed: Random seed for reproducibility.
+        :param board_size: Size of the game board, default is 12x12.
+        :param silent_mode: If True, runs the game without graphics or sound.
+        """
+        # Initialize game board parameters
         self.board_size = board_size
         self.grid_size = self.board_size ** 2
         self.cell_size = 40
         self.width = self.height = self.board_size * self.cell_size
 
+        # Initialize display border parameters
         self.border_size = 20
         self.display_width = self.width + 2 * self.border_size
         self.display_height = self.height + 2 * self.border_size + 40
 
+        # Check if silent mode is enabled
         self.silent_mode = silent_mode
         if not silent_mode:
+            # Initialize Pygame and create game window
             pygame.init()
             pygame.display.set_caption("Snake Game")
             self.screen = pygame.display.set_mode((self.display_width, self.display_height))
@@ -32,9 +45,11 @@ class SnakeGame:
             self.sound_game_over = mixer.Sound("sound/game_over.wav")
             self.sound_victory = mixer.Sound("sound/victory.wav")
         else:
+            # If silent mode is enabled, do not initialize display and font
             self.screen = None
             self.font = None
 
+        # Initialize game state variables
         self.snake = None
         self.non_snake = None
 
@@ -43,19 +58,44 @@ class SnakeGame:
         self.food = None
         self.seed_value = seed
 
-        random.seed(seed) # Set random seed.
-        
+        # Set random seed
+        random.seed(seed)
+
+        # Reset game state
         self.reset()
 
     def reset(self):
-        self.snake = [(self.board_size // 2 + i, self.board_size // 2) for i in range(1, -2, -1)] # Initialize the snake with three cells in (row, column) format.
-        self.non_snake = set([(row, col) for row in range(self.board_size) for col in range(self.board_size) if (row, col) not in self.snake]) # Initialize the non-snake cells.
-        self.direction = "DOWN" # Snake starts downward in each round
+        """
+        Resets the game state, including the snake's initial position, direction, food position, and score.
+        """
+        # Initialize the snake with three cells in (row, column) format, starting in the middle of the board and extending upwards
+        self.snake = [(self.board_size // 2 + i, self.board_size // 2) for i in range(1, -2, -1)]
+
+        # Initialize the non-snake cells, which are all board cells excluding the snake's initial position
+        self.non_snake = set([(row, col) for row in range(self.board_size) for col in range(self.board_size) if (row, col) not in self.snake])
+
+        # Snake starts downward in each round
+        self.direction = "DOWN"
+
+        # Generate the initial food position
         self.food = self._generate_food()
+
+        # Reset the score to 0
         self.score = 0
 
     def step(self, action):
-        self._update_direction(action) # Update direction based on action.
+        """
+        Perform one step of the game based on the given action.
+
+        Parameters:
+        - action: The action to be performed, which determines the new direction of the snake.
+
+        Returns:
+        - done: A boolean indicating whether the game is over.
+        - info: A dictionary containing information about the game state, including snake size, snake head position, previous snake head position, food position, and whether food was obtained.
+        """
+        # Update direction based on action.
+        self._update_direction(action)
 
         # Move snake based on current action.
         row, col = self.snake[0]
@@ -102,6 +142,7 @@ class SnakeGame:
         if food_obtained:
             self.food = self._generate_food()
 
+        # Prepare information about the game state.
         info ={
             "snake_size": len(self.snake),
             "snake_head_pos": np.array(self.snake[0]),
@@ -110,7 +151,9 @@ class SnakeGame:
             "food_obtained": food_obtained
         }
 
+        # Return whether the game is over and the game state information.
         return done, info
+
 
     # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
     def _update_direction(self, action):

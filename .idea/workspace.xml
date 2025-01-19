@@ -4,13 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="7024be62-5b7e-491d-ad15-b6678081efec" name="更改" comment="feat: 更新项目结构和依赖版本&#10;&#10;- 添加 .idea 目录和相关配置文件，配置项目设置和忽略文件&#10;- 更新 requirements.txt，升级 gym 和 stable-baselines3 依赖版本&#10;- 重构 snake_game.py，优化游戏环境初始化和步进逻辑&#10;- 更新 snake_game_custom_wrapper_cnn.py，完善 Gym 环境接口&#10;- 修改 test_cnn.py，增加测试参数和统计信息">
-      <change beforePath="$PROJECT_DIR$/main/snake_game.py" beforeDir="false" afterPath="$PROJECT_DIR$/main/snake_game.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main/snake_game_custom_wrapper_cnn.py" beforeDir="false" afterPath="$PROJECT_DIR$/main/snake_game_custom_wrapper_cnn.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main/snake_game_custom_wrapper_mlp.py" beforeDir="false" afterPath="$PROJECT_DIR$/main/snake_game_custom_wrapper_mlp.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main/train_cnn.py" beforeDir="false" afterPath="$PROJECT_DIR$/main/train_cnn.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main/train_mlp.py" beforeDir="false" afterPath="$PROJECT_DIR$/main/train_mlp.py" afterDir="false" />
-    </list>
+    <list default="true" id="7024be62-5b7e-491d-ad15-b6678081efec" name="更改" comment="feat: 更新项目结构和依赖版本&#10;&#10;- 添加 .idea 目录和相关配置文件，配置项目设置和忽略文件&#10;- 更新 requirements.txt，升级 gym 和 stable-baselines3 依赖版本&#10;- 重构 snake_game.py，优化游戏环境初始化和步进逻辑&#10;- 更新 snake_game_custom_wrapper_cnn.py，完善 Gym 环境接口&#10;- 修改 test_cnn.py，增加测试参数和统计信息" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

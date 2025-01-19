@@ -34,13 +34,40 @@ def linear_schedule(initial_value, final_value=0.0):
     return scheduler
 
 def make_env(seed=0):
+    """
+    创建并配置环境的函数工厂。
+
+    该函数的主要作用是根据给定的种子生成一个特定的环境配置，包括随机数种子的设置、动作掩码的添加和监控器的包装。
+
+    参数:
+    - seed (int): 用于环境和随机数生成器的种子，以确保实验的可重复性。
+
+    返回:
+    - function: 一个无参数函数，当调用时，返回一个配置好的环境实例。
+    """
+
     def _init():
+        """
+        初始化和包装环境的内部函数。
+
+        该函数按顺序执行以下操作：
+        1. 创建基础蛇类环境。
+        2. 应用动作掩码，限制非法动作。
+        3. 使用监控器包装环境，以跟踪奖励和完成情况。
+        4. 设置环境的随机数种子。
+
+        返回:
+        - env: 配置好的环境实例。
+        """
         env = SnakeEnv(seed=seed)
+        print(f"Original action space: {env.action_space}")  # 调试输出
         env = ActionMasker(env, SnakeEnv.get_action_mask)
+        print(f"Action space after ActionMasker: {env.action_space}")  # 调试输出
         env = Monitor(env)
-        env.seed(seed)
         return env
+
     return _init
+
 
 def main():
 

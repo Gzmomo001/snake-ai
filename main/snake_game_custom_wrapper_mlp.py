@@ -25,6 +25,9 @@ class SnakeEnv(gym.Env):
         self.init_snake_size = len(self.game.snake)
         self.max_growth = self.grid_size - self.init_snake_size
 
+        #modify
+        self.seed = seed
+
         self.done = False
 
         if limit_step:
@@ -33,6 +36,20 @@ class SnakeEnv(gym.Env):
             self.step_limit = 1e9 # Basically no limit.
         self.reward_step_counter = 0
 
+    def set_seed(self, seed):
+        """
+        设置种子值。
+
+        该方法用于设置随机数生成器的种子值，以确保随机性的一致性。
+
+        参数:
+        seed (int): 需要设置的种子值。
+
+        返回:
+        int: 返回设置后的种子值。
+        """
+        self.seed = seed  # 设置实例的种子值属性为传入的种子值
+        return self.seed  # 返回设置后的种子值
     def reset(self):
         self.game.reset()
 

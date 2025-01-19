@@ -1,0 +1,11 @@
+Logging to logs/PPO_13
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 655      |
+|    ep_rew_mean     | -12.2    |
+| time/              |          |
+|    fps             | 5545     |
+|    iterations      | 1        |
+|    time_elapsed    | 11       |
+|    total_timesteps | 65536    |
+---------------------------------

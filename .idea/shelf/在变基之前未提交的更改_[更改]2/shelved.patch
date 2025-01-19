@@ -1,0 +1,399 @@
+Index: main/snake_game.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import os\nos.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = \"hide\"  # 隐藏Pygame欢迎信息\nos.environ['SDL_AUDIODRIVER'] = 'dummy'  # 禁用音频\nimport sys\nimport random\n\nimport numpy as np\n\nos.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'\nimport pygame\nfrom pygame import mixer\n\nclass SnakeGame:\n    def __init__(self, seed=0, board_size=12, silent_mode=True):\n        \"\"\"\n        Initializes the Snake game environment.\n\n        :param seed: Random seed for reproducibility.\n        :param board_size: Size of the game board, default is 12x12.\n        :param silent_mode: If True, runs the game without graphics or sound.\n        \"\"\"\n        # Initialize game board parameters\n        self.board_size = board_size\n        self.grid_size = self.board_size ** 2\n        self.cell_size = 40\n        self.width = self.height = self.board_size * self.cell_size\n\n        # Initialize display border parameters\n        self.border_size = 20\n        self.display_width = self.width + 2 * self.border_size\n        self.display_height = self.height + 2 * self.border_size + 40\n\n        # Check if silent mode is enabled\n        self.silent_mode = silent_mode\n        if not silent_mode:\n            # Initialize Pygame and create game window\n            pygame.init()\n            pygame.display.set_caption(\"Snake Game\")\n            self.screen = pygame.display.set_mode((self.display_width, self.display_height))\n            self.font = pygame.font.Font(None, 36)\n\n            # Load sound effects\n            mixer.init()\n            self.sound_eat = mixer.Sound(\"sound/eat.wav\")\n            self.sound_game_over = mixer.Sound(\"sound/game_over.wav\")\n            self.sound_victory = mixer.Sound(\"sound/victory.wav\")\n        else:\n            # If silent mode is enabled, do not initialize display and font\n            self.screen = None\n            self.font = None\n\n        # Initialize game state variables\n        self.snake = None\n        self.non_snake = None\n\n        self.direction = None\n        self.score = 0\n        self.food = None\n        self.seed_value = seed\n\n        # Set random seed\n        random.seed(seed)\n\n        # Reset game state\n        self.reset()\n\n    def reset(self):\n        \"\"\"\n        Resets the game state, including the snake's initial position, direction, food position, and score.\n        \"\"\"\n        # Initialize the snake with three cells in (row, column) format, starting in the middle of the board and extending upwards\n        self.snake = [(self.board_size // 2 + i, self.board_size // 2) for i in range(1, -2, -1)]\n\n        # Initialize the non-snake cells, which are all board cells excluding the snake's initial position\n        self.non_snake = set([(row, col) for row in range(self.board_size) for col in range(self.board_size) if (row, col) not in self.snake])\n\n        # Snake starts downward in each round\n        self.direction = \"DOWN\"\n\n        # Generate the initial food position\n        self.food = self._generate_food()\n\n        # Reset the score to 0\n        self.score = 0\n\n    def step(self, action):\n        \"\"\"\n        Perform one step of the game based on the given action.\n\n        Parameters:\n        - action: The action to be performed, which determines the new direction of the snake.\n\n        Returns:\n        - done: A boolean indicating whether the game is over.\n        - info: A dictionary containing information about the game state, including snake size, snake head position, previous snake head position, food position, and whether food was obtained.\n        \"\"\"\n        # Update direction based on action.\n        self._update_direction(action)\n\n        # Move snake based on current action.\n        row, col = self.snake[0]\n        if self.direction == \"UP\":\n            row -= 1\n        elif self.direction == \"DOWN\":\n            row += 1\n        elif self.direction == \"LEFT\":\n            col -= 1\n        elif self.direction == \"RIGHT\":\n            col += 1\n\n        # Check if snake eats food.\n        if (row, col) == self.food: # If snake eats food, it won't pop the last cell. The food grid will be taken by snake later, no need to update board vacancy matrix.\n            food_obtained = True\n            self.score += 10 # Add 10 points to the score when food is eaten.\n            if not self.silent_mode:\n                self.sound_eat.play()\n        else:\n            food_obtained = False\n            self.non_snake.add(self.snake.pop()) # Pop the last cell of the snake and add it to the non-snake set.\n\n        # Check if snake collided with itself or the wall\n        done = (\n            (row, col) in self.snake\n            or row < 0\n            or row >= self.board_size\n            or col < 0\n            or col >= self.board_size\n        )\n\n        if not done:\n            self.snake.insert(0, (row, col))\n            self.non_snake.remove((row, col))\n\n        else: # If game is over and the game is not in silent mode, play game over sound effect.\n            if not self.silent_mode:\n                if len(self.snake) < self.grid_size:\n                    self.sound_game_over.play()\n                else:\n                    self.sound_victory.play()\n\n        # Add new food after snake movement completes.\n        if food_obtained:\n            self.food = self._generate_food()\n\n        # Prepare information about the game state.\n        info ={\n            \"snake_size\": len(self.snake),\n            \"snake_head_pos\": np.array(self.snake[0]),\n            \"prev_snake_head_pos\": np.array(self.snake[1]),\n            \"food_pos\": np.array(self.food),\n            \"food_obtained\": food_obtained\n        }\n\n        # Return whether the game is over and the game state information.\n        return done, info\n\n\n    # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN\n    def _update_direction(self, action):\n        if action == 0:\n            if self.direction != \"DOWN\":\n                self.direction = \"UP\"\n        elif action == 1:\n            if self.direction != \"RIGHT\":\n                self.direction = \"LEFT\"\n        elif action == 2:\n            if self.direction != \"LEFT\":\n                self.direction = \"RIGHT\"\n        elif action == 3:\n            if self.direction != \"UP\":\n                self.direction = \"DOWN\"\n        # Swich Case is supported in Python 3.10+\n\n    def _generate_food(self):\n        if len(self.non_snake) > 0:\n            food = random.sample(self.non_snake, 1)[0]\n        else: # If the snake occupies the entire board, no need to generate new food and just default to (0, 0).\n            food = (0, 0)\n        return food\n    \n    def draw_score(self):\n        score_text = self.font.render(f\"Score: {self.score}\", True, (255, 255, 255))\n        self.screen.blit(score_text, (self.border_size, self.height + 2 * self.border_size))\n    \n    def draw_welcome_screen(self):\n        title_text = self.font.render(\"SNAKE GAME\", True, (255, 255, 255))\n        start_button_text = \"START\"\n\n        self.screen.fill((0, 0, 0))\n        self.screen.blit(title_text, (self.display_width // 2 - title_text.get_width() // 2, self.display_height // 4))\n        self.draw_button_text(start_button_text, (self.display_width // 2, self.display_height // 2))\n        pygame.display.flip()\n\n    def draw_game_over_screen(self):\n        game_over_text = self.font.render(\"GAME OVER\", True, (255, 255, 255))\n        final_score_text = self.font.render(f\"SCORE: {self.score}\", True, (255, 255, 255))\n        retry_button_text = \"RETRY\"\n\n        self.screen.fill((0, 0, 0))\n        self.screen.blit(game_over_text, (self.display_width // 2 - game_over_text.get_width() // 2, self.display_height // 4))\n        self.screen.blit(final_score_text, (self.display_width // 2 - final_score_text.get_width() // 2, self.display_height // 4 + final_score_text.get_height() + 10))\n        self.draw_button_text(retry_button_text, (self.display_width // 2, self.display_height // 2))          \n        pygame.display.flip()\n\n    def draw_button_text(self, button_text_str, pos, hover_color=(255, 255, 255), normal_color=(100, 100, 100)):\n        mouse_pos = pygame.mouse.get_pos()\n        button_text = self.font.render(button_text_str, True, normal_color)\n        text_rect = button_text.get_rect(center=pos)\n        \n        if text_rect.collidepoint(mouse_pos):\n            colored_text = self.font.render(button_text_str, True, hover_color)\n        else:\n            colored_text = self.font.render(button_text_str, True, normal_color)\n        \n        self.screen.blit(colored_text, text_rect)\n    \n    def draw_countdown(self, number):\n        countdown_text = self.font.render(str(number), True, (255, 255, 255))\n        self.screen.blit(countdown_text, (self.display_width // 2 - countdown_text.get_width() // 2, self.display_height // 2 - countdown_text.get_height() // 2))\n        pygame.display.flip()\n\n    def is_mouse_on_button(self, button_text):\n        mouse_pos = pygame.mouse.get_pos()\n        text_rect = button_text.get_rect(\n            center=(\n                self.display_width // 2,\n                self.display_height // 2,\n            )\n        )\n        return text_rect.collidepoint(mouse_pos)\n\n    def render(self):\n        self.screen.fill((0, 0, 0))\n\n        # Draw border\n        pygame.draw.rect(self.screen, (255, 255, 255), (self.border_size - 2, self.border_size - 2, self.width + 4, self.height + 4), 2)\n\n        # Draw snake\n        self.draw_snake()\n        \n        # Draw food\n        if len(self.snake) < self.grid_size: # If the snake occupies the entire board, don't draw food.\n            r, c = self.food\n            pygame.draw.rect(self.screen, (255, 0, 0), (c * self.cell_size + self.border_size, r * self.cell_size + self.border_size, self.cell_size, self.cell_size))\n\n        # Draw score\n        self.draw_score()\n\n        pygame.display.flip()\n\n        for event in pygame.event.get():\n            if event.type == pygame.QUIT:\n                pygame.quit()\n                sys.exit()\n\n    def draw_snake(self):\n        # Draw the head\n        head_r, head_c = self.snake[0]\n        head_x = head_c * self.cell_size + self.border_size\n        head_y = head_r * self.cell_size + self.border_size\n\n        # Draw the head (Blue)\n        pygame.draw.polygon(self.screen, (100, 100, 255), [\n            (head_x + self.cell_size // 2, head_y),\n            (head_x + self.cell_size, head_y + self.cell_size // 2),\n            (head_x + self.cell_size // 2, head_y + self.cell_size),\n            (head_x, head_y + self.cell_size // 2)\n        ])\n\n        eye_size = 3\n        eye_offset = self.cell_size // 4\n        pygame.draw.circle(self.screen, (255, 255, 255), (head_x + eye_offset, head_y + eye_offset), eye_size)\n        pygame.draw.circle(self.screen, (255, 255, 255), (head_x + self.cell_size - eye_offset, head_y + eye_offset), eye_size)\n\n        # Draw the body (color gradient)\n        color_list = np.linspace(255, 100, len(self.snake), dtype=np.uint8)\n        i = 1\n        for r, c in self.snake[1:]:\n            body_x = c * self.cell_size + self.border_size\n            body_y = r * self.cell_size + self.border_size\n            body_width = self.cell_size\n            body_height = self.cell_size\n            body_radius = 5\n            pygame.draw.rect(self.screen, (0, color_list[i], 0),\n                            (body_x, body_y, body_width, body_height), border_radius=body_radius)\n            i += 1\n        pygame.draw.rect(self.screen, (255, 100, 100),\n                            (body_x, body_y, body_width, body_height), border_radius=body_radius)\n        \n\nif __name__ == \"__main__\":\n    import time\n\n    seed = random.randint(0, 1e9)\n    game = SnakeGame(seed=seed, silent_mode=False)\n    pygame.init()\n    game.screen = pygame.display.set_mode((game.display_width, game.display_height))\n    pygame.display.set_caption(\"Snake Game\")\n    game.font = pygame.font.Font(None, 36)\n    \n\n    game_state = \"welcome\"\n\n    # Two hidden button for start and retry click detection\n    start_button = game.font.render(\"START\", True, (0, 0, 0))\n    retry_button = game.font.render(\"RETRY\", True, (0, 0, 0))\n\n    update_interval = 0.15\n    start_time = time.time()\n    action = -1\n\n    while True:\n        \n        for event in pygame.event.get():\n\n            if game_state == \"running\":\n                if event.type == pygame.KEYDOWN:\n                    if event.key == pygame.K_UP:\n                        action = 0\n                    elif event.key == pygame.K_DOWN:\n                        action = 3\n                    elif event.key == pygame.K_LEFT:\n                        action = 1\n                    elif event.key == pygame.K_RIGHT:\n                        action = 2\n\n            if event.type == pygame.QUIT:\n                pygame.quit()\n                sys.exit()\n\n            if game_state == \"welcome\" and event.type == pygame.MOUSEBUTTONDOWN:\n                if game.is_mouse_on_button(start_button):\n                    for i in range(3, 0, -1):\n                        game.screen.fill((0, 0, 0))\n                        game.draw_countdown(i)\n                        game.sound_eat.play()\n                        pygame.time.wait(1000)\n                    action = -1  # Reset action variable when starting a new game\n                    game_state = \"running\"\n\n            if game_state == \"game_over\" and event.type == pygame.MOUSEBUTTONDOWN:\n                if game.is_mouse_on_button(retry_button):\n                    for i in range(3, 0, -1):\n                        game.screen.fill((0, 0, 0))\n                        game.draw_countdown(i)\n                        game.sound_eat.play()\n                        pygame.time.wait(1000)\n                    game.reset()\n                    action = -1  # Reset action variable when starting a new game\n                    game_state = \"running\"\n        \n        if game_state == \"welcome\":\n            game.draw_welcome_screen()\n\n        if game_state == \"game_over\":\n            game.draw_game_over_screen()\n\n        if game_state == \"running\":\n            if time.time() - start_time >= update_interval:\n                done, _ = game.step(action)\n                game.render()\n                start_time = time.time()\n\n                if done:\n                    game_state = \"game_over\"\n        \n        pygame.time.wait(1)\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/main/snake_game.py b/main/snake_game.py
+--- a/main/snake_game.py	(revision 5c302e81dba4223d81c3f4866cf0d81a24a61ecc)
++++ b/main/snake_game.py	(date 1737297836909)
+@@ -83,6 +83,10 @@
+         # Reset the score to 0
+         self.score = 0
+ 
++    def seed(self, seed=None):
++        self.seed_value = seed
++        return [self.seed_value]
++
+     def step(self, action):
+         """
+         Perform one step of the game based on the given action.
+Index: main/train_cnn.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import os\nimport sys\nimport random\n\nimport torch\nfrom stable_baselines3.common.monitor import Monitor\nfrom stable_baselines3.common.vec_env import SubprocVecEnv\nfrom stable_baselines3.common.callbacks import CheckpointCallback\n\nfrom sb3_contrib import MaskablePPO\nfrom sb3_contrib.common.wrappers import ActionMasker\n\nfrom snake_game_custom_wrapper_cnn import SnakeEnv\n\nif torch.backends.mps.is_available():\n    NUM_ENV = 32 * 2\nelse:\n    NUM_ENV = 32\nLOG_DIR = \"logs\"\n\nos.makedirs(LOG_DIR, exist_ok=True)\n\n# Linear scheduler\ndef linear_schedule(initial_value, final_value=0.0):\n\n    if isinstance(initial_value, str):\n        initial_value = float(initial_value)\n        final_value = float(final_value)\n        assert (initial_value > 0.0)\n\n    def scheduler(progress):\n        return final_value + progress * (initial_value - final_value)\n\n    return scheduler\n\ndef make_env(seed=0):\n    def _init():\n        env = SnakeEnv(seed=seed)\n        env = ActionMasker(env, SnakeEnv.get_action_mask)\n        env = Monitor(env)\n        env.seed(seed)\n        return env\n    return _init\n\ndef main():\n\n    # Generate a list of random seeds for each environment.\n    seed_set = set()\n    while len(seed_set) < NUM_ENV:\n        seed_set.add(random.randint(0, 1e9))\n\n    # Create the Snake environment.\n    env = SubprocVecEnv([make_env(seed=s) for s in seed_set])\n\n    if torch.backends.mps.is_available():\n        lr_schedule = linear_schedule(5e-4, 2.5e-6)\n        clip_range_schedule = linear_schedule(0.150, 0.025)\n        # Instantiate a PPO agent using MPS (Metal Performance Shaders).\n        model = MaskablePPO(\n            \"CnnPolicy\",\n            env,\n            device=\"mps\",\n            verbose=1,\n            n_steps=2048,\n            batch_size=512*8,\n            n_epochs=4,\n            gamma=0.94,\n            learning_rate=lr_schedule,\n            clip_range=clip_range_schedule,\n            tensorboard_log=LOG_DIR\n        )\n    else:\n        lr_schedule = linear_schedule(2.5e-4, 2.5e-6)\n        clip_range_schedule = linear_schedule(0.150, 0.025)\n        # Instantiate a PPO agent using CUDA.\n        model = MaskablePPO(\n            \"CnnPolicy\",\n            env,\n            device=\"cuda\",\n            verbose=1,\n            n_steps=2048,\n            batch_size=512,\n            n_epochs=4,\n            gamma=0.94,\n            learning_rate=lr_schedule,\n            clip_range=clip_range_schedule,\n            tensorboard_log=LOG_DIR\n        )\n\n    # Set the save directory\n    if torch.backends.mps.is_available():\n        save_dir = \"trained_models_cnn_mps\"\n    else:\n        save_dir = \"trained_models_cnn\"\n    os.makedirs(save_dir, exist_ok=True)\n\n    checkpoint_interval = 15625 # checkpoint_interval * num_envs = total_steps_per_checkpoint\n    checkpoint_callback = CheckpointCallback(save_freq=checkpoint_interval, save_path=save_dir, name_prefix=\"ppo_snake\")\n\n    # Writing the training logs from stdout to a file\n    original_stdout = sys.stdout\n    log_file_path = os.path.join(save_dir, \"training_log.txt\")\n    with open(log_file_path, 'w') as log_file:\n        sys.stdout = log_file\n\n        model.learn(\n            total_timesteps=int(100000000),\n            callback=[checkpoint_callback]\n        )\n        env.close()\n\n    # Restore stdout\n    sys.stdout = original_stdout\n\n    # Save the final model\n    model.save(os.path.join(save_dir, \"ppo_snake_final.zip\"))\n\nif __name__ == \"__main__\":\n    main()\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/main/train_cnn.py b/main/train_cnn.py
+--- a/main/train_cnn.py	(revision 5c302e81dba4223d81c3f4866cf0d81a24a61ecc)
++++ b/main/train_cnn.py	(date 1737297836914)
+@@ -1,119 +1,9 @@
+-import os
+-import sys
+-import random
+-
+-import torch
+-from stable_baselines3.common.monitor import Monitor
+-from stable_baselines3.common.vec_env import SubprocVecEnv
+-from stable_baselines3.common.callbacks import CheckpointCallback
+-
+-from sb3_contrib import MaskablePPO
+-from sb3_contrib.common.wrappers import ActionMasker
+-
+-from snake_game_custom_wrapper_cnn import SnakeEnv
+-
+-if torch.backends.mps.is_available():
+-    NUM_ENV = 32 * 2
+-else:
+-    NUM_ENV = 32
+-LOG_DIR = "logs"
+-
+-os.makedirs(LOG_DIR, exist_ok=True)
+-
+-# Linear scheduler
+-def linear_schedule(initial_value, final_value=0.0):
+-
+-    if isinstance(initial_value, str):
+-        initial_value = float(initial_value)
+-        final_value = float(final_value)
+-        assert (initial_value > 0.0)
+-
+-    def scheduler(progress):
+-        return final_value + progress * (initial_value - final_value)
+-
+-    return scheduler
+-
+-def make_env(seed=0):
+-    def _init():
+-        env = SnakeEnv(seed=seed)
+-        env = ActionMasker(env, SnakeEnv.get_action_mask)
+-        env = Monitor(env)
+-        env.seed(seed)
+-        return env
+-    return _init
++# -*- coding: utf-8 -*-
+ 
+-def main():
++# 其他代码...
+ 
+-    # Generate a list of random seeds for each environment.
+-    seed_set = set()
+-    while len(seed_set) < NUM_ENV:
+-        seed_set.add(random.randint(0, 1e9))
++# 示例：如果在代码中有文件读取操作，确保指定编码
++with open('some_file.txt', 'r', encoding='utf-8') as file:
++    content = file.read()
+ 
+-    # Create the Snake environment.
+-    env = SubprocVecEnv([make_env(seed=s) for s in seed_set])
+-
+-    if torch.backends.mps.is_available():
+-        lr_schedule = linear_schedule(5e-4, 2.5e-6)
+-        clip_range_schedule = linear_schedule(0.150, 0.025)
+-        # Instantiate a PPO agent using MPS (Metal Performance Shaders).
+-        model = MaskablePPO(
+-            "CnnPolicy",
+-            env,
+-            device="mps",
+-            verbose=1,
+-            n_steps=2048,
+-            batch_size=512*8,
+-            n_epochs=4,
+-            gamma=0.94,
+-            learning_rate=lr_schedule,
+-            clip_range=clip_range_schedule,
+-            tensorboard_log=LOG_DIR
+-        )
+-    else:
+-        lr_schedule = linear_schedule(2.5e-4, 2.5e-6)
+-        clip_range_schedule = linear_schedule(0.150, 0.025)
+-        # Instantiate a PPO agent using CUDA.
+-        model = MaskablePPO(
+-            "CnnPolicy",
+-            env,
+-            device="cuda",
+-            verbose=1,
+-            n_steps=2048,
+-            batch_size=512,
+-            n_epochs=4,
+-            gamma=0.94,
+-            learning_rate=lr_schedule,
+-            clip_range=clip_range_schedule,
+-            tensorboard_log=LOG_DIR
+-        )
+-
+-    # Set the save directory
+-    if torch.backends.mps.is_available():
+-        save_dir = "trained_models_cnn_mps"
+-    else:
+-        save_dir = "trained_models_cnn"
+-    os.makedirs(save_dir, exist_ok=True)
+-
+-    checkpoint_interval = 15625 # checkpoint_interval * num_envs = total_steps_per_checkpoint
+-    checkpoint_callback = CheckpointCallback(save_freq=checkpoint_interval, save_path=save_dir, name_prefix="ppo_snake")
+-
+-    # Writing the training logs from stdout to a file
+-    original_stdout = sys.stdout
+-    log_file_path = os.path.join(save_dir, "training_log.txt")
+-    with open(log_file_path, 'w') as log_file:
+-        sys.stdout = log_file
+-
+-        model.learn(
+-            total_timesteps=int(100000000),
+-            callback=[checkpoint_callback]
+-        )
+-        env.close()
+-
+-    # Restore stdout
+-    sys.stdout = original_stdout
+-
+-    # Save the final model
+-    model.save(os.path.join(save_dir, "ppo_snake_final.zip"))
+-
+-if __name__ == "__main__":
+-    main()
++# 其他代码...
+\ No newline at end of file
+Index: main/snake_game_custom_wrapper_cnn.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import math\n\nimport gym\nimport numpy as np\n\nfrom snake_game import SnakeGame\n\nclass SnakeEnv(gym.Env):\n    \"\"\"\n    初始化Snake环境。\n\n    参数:\n    - seed: 随机种子，用于确保环境的可重复性。\n    - board_size: 棋盘的大小，决定了游戏区域的宽度和高度。\n    - silent_mode: 是否启用静默模式，如果启用，游戏运行时不会显示图形界面。\n    - limit_step: 是否限制步骤数量，用于控制游戏的最大步数。\n\n    该环境用于模拟贪吃蛇游戏，提供与 Gym 兼容的接口。\n    \"\"\"\n    def __init__(self, seed=0, board_size=12, silent_mode=True, limit_step=True):\n        super().__init__()\n        # 初始化SnakeGame实例，这是实际运行游戏的内部引擎。\n        self.game = SnakeGame(seed=seed, board_size=board_size, silent_mode=silent_mode)\n        # 重置游戏状态，准备开始新的游戏。\n        self.game.reset()\n\n        # 记录是否启用静默模式。\n        self.silent_mode = silent_mode\n\n        # 定义动作空间，贪吃蛇可以向上、左、右、下四个方向移动。\n        self.action_space = gym.spaces.Discrete(4) # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN\n\n        # 定义观测空间，表示游戏画面的大小和颜色深度。\n        self.observation_space = gym.spaces.Box(\n            low=0, high=255,\n            shape=(84, 84, 3),\n            dtype=np.uint8\n        )\n\n        # 设置随机种子，用于环境的可重复性。\n        self.seed_val = 5201314\n\n        # 记录棋盘大小，用于计算最大步数和其他参数。\n        self.board_size = board_size\n        # 计算棋盘的格子总数，决定蛇的最大长度。\n        self.grid_size = board_size ** 2 # Max length of snake is board_size^2\n        # 计算游戏初始时蛇的长度。\n        self.init_snake_size = len(self.game.snake)\n        # 计算蛇的最大增长长度。\n        self.max_growth = self.grid_size - self.init_snake_size\n\n        # 初始化游戏结束标志为False。\n        self.done = False\n\n        # 根据是否限制步骤，设置步数限制。\n        if limit_step:\n            # 如果限制步骤，设置步数限制为棋盘格子数乘以4，提供充足的机会获取食物。\n            self.step_limit = self.grid_size * 4 # More than enough steps to get the food.\n        else:\n            # 如果不限制步骤，设置极大的步数限制，几乎等于不限制。\n            self.step_limit = 1e9 # Basically no limit.\n        # 初始化奖励计数器，用于跟踪连续行动的次数。\n        self.reward_step_counter = 0\n\n    def reset(self):\n        \"\"\"\n        重置游戏环境。\n\n        此方法在游戏或训练回合开始时调用，以初始化游戏状态。\n        它不仅重置了游戏本身，还重置了一些内部变量，为新的训练回合做准备。\n        \"\"\"\n        # 重置游戏状态\n        self.game.reset()\n\n        # 初始化完成标志为False，表示游戏尚未结束\n        self.done = False\n        # 初始化奖励计数器，用于计算步数奖励\n        self.reward_step_counter = 0\n\n        # 生成并返回初始观察值\n        obs = self._generate_observation()\n        return obs\n    \n    def step(self, action):\n        self.done, info = self.game.step(action) # info = {\"snake_size\": int, \"snake_head_pos\": np.array, \"prev_snake_head_pos\": np.array, \"food_pos\": np.array, \"food_obtained\": bool}\n        obs = self._generate_observation()\n\n        reward = 0.0\n        self.reward_step_counter += 1\n\n        if info[\"snake_size\"] == self.grid_size: # Snake fills up the entire board. Game over.\n            reward = self.max_growth * 0.1 # Victory reward\n            self.done = True\n            if not self.silent_mode:\n                self.game.sound_victory.play()\n            return obs, reward, self.done, info\n        \n        if self.reward_step_counter > self.step_limit: # Step limit reached, game over.\n            self.reward_step_counter = 0\n            self.done = True\n        \n        if self.done: # Snake bumps into wall or itself. Episode is over.\n            # Game Over penalty is based on snake size.\n            reward = - math.pow(self.max_growth, (self.grid_size - info[\"snake_size\"]) / self.max_growth) # (-max_growth, -1)            \n            reward = reward * 0.1\n            return obs, reward, self.done, info\n          \n        elif info[\"food_obtained\"]: # Food eaten. Reward boost on snake size.\n            reward = info[\"snake_size\"] / self.grid_size\n            self.reward_step_counter = 0 # Reset reward step counter\n        \n        else:\n            # Give a tiny reward/penalty to the agent based on whether it is heading towards the food or not.\n            # Not competing with game over penalty or the food eaten reward.\n            if np.linalg.norm(info[\"snake_head_pos\"] - info[\"food_pos\"]) < np.linalg.norm(info[\"prev_snake_head_pos\"] - info[\"food_pos\"]):\n                reward = 1 / info[\"snake_size\"]\n            else:\n                reward = - 1 / info[\"snake_size\"]\n            reward = reward * 0.1\n\n        # max_score: 72 + 14.1 = 86.1\n        # min_score: -14.1\n\n        return obs, reward, self.done, info\n    \n    def render(self):\n        self.game.render()\n\n    def seed(self, seed=None):\n        self.seed_val = seed\n        return [seed]\n\n    def get_action_mask(self):\n        return np.array([[self._check_action_validity(a) for a in range(self.action_space.n)]])\n    \n    # Check if the action is against the current direction of the snake or is ending the game.\n    def _check_action_validity(self, action):\n        current_direction = self.game.direction\n        snake_list = self.game.snake\n        row, col = snake_list[0]\n        if action == 0: # UP\n            if current_direction == \"DOWN\":\n                return False\n            else:\n                row -= 1\n\n        elif action == 1: # LEFT\n            if current_direction == \"RIGHT\":\n                return False\n            else:\n                col -= 1\n\n        elif action == 2: # RIGHT \n            if current_direction == \"LEFT\":\n                return False\n            else:\n                col += 1     \n        \n        elif action == 3: # DOWN \n            if current_direction == \"UP\":\n                return False\n            else:\n                row += 1\n\n        # Check if snake collided with itself or the wall. Note that the tail of the snake would be poped if the snake did not eat food in the current step.\n        if (row, col) == self.game.food:\n            game_over = (\n                (row, col) in snake_list # The snake won't pop the last cell if it ate food.\n                or row < 0\n                or row >= self.board_size\n                or col < 0\n                or col >= self.board_size\n            )\n        else:\n            game_over = (\n                (row, col) in snake_list[:-1] # The snake will pop the last cell if it did not eat food.\n                or row < 0\n                or row >= self.board_size\n                or col < 0\n                or col >= self.board_size\n            )\n\n        if game_over:\n            return False\n        else:\n            return True\n\n    # EMPTY: BLACK; SnakeBODY: GRAY; SnakeHEAD: GREEN; FOOD: RED;\n    def _generate_observation(self):\n        obs = np.zeros((self.game.board_size, self.game.board_size), dtype=np.uint8)\n\n        # Set the snake body to gray with linearly decreasing intensity from head to tail.\n        obs[tuple(np.transpose(self.game.snake))] = np.linspace(200, 50, len(self.game.snake), dtype=np.uint8)\n        \n        # Stack single layer into 3-channel-image.\n        obs = np.stack((obs, obs, obs), axis=-1)\n        \n        # Set the snake head to green and the tail to blue\n        obs[tuple(self.game.snake[0])] = [0, 255, 0]\n        obs[tuple(self.game.snake[-1])] = [255, 0, 0]\n\n        # Set the food to red\n        obs[self.game.food] = [0, 0, 255]\n\n        # Enlarge the observation to 84x84\n        obs = np.repeat(np.repeat(obs, 7, axis=0), 7, axis=1)\n\n        return obs\n\n# Test the environment using random actions\n# NUM_EPISODES = 100\n# RENDER_DELAY = 0.001\n# from matplotlib import pyplot as plt\n\n# if __name__ == \"__main__\":\n#     env = SnakeEnv(silent_mode=False)\n    \n    # # Test Init Efficiency\n    # print(MODEL_PATH_S)\n    # print(MODEL_PATH_L)\n    # num_success = 0\n    # for i in range(NUM_EPISODES):\n    #     num_success += env.reset()\n    # print(f\"Success rate: {num_success/NUM_EPISODES}\")\n\n    # sum_reward = 0\n\n    # # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN\n    # action_list = [1, 1, 1, 0, 0, 0, 2, 2, 2, 3, 3, 3]\n    \n    # for _ in range(NUM_EPISODES):\n    #     obs = env.reset()\n    #     done = False\n    #     i = 0\n    #     while not done:\n    #         plt.imshow(obs, interpolation='nearest')\n    #         plt.show()\n    #         action = env.action_space.sample()\n    #         # action = action_list[i]\n    #         i = (i + 1) % len(action_list)\n    #         obs, reward, done, info = env.step(action)\n    #         sum_reward += reward\n    #         if np.absolute(reward) > 0.001:\n    #             print(reward)\n    #         env.render()\n            \n    #         time.sleep(RENDER_DELAY)\n    #     # print(info[\"snake_length\"])\n    #     # print(info[\"food_pos\"])\n    #     # print(obs)\n    #     print(\"sum_reward: %f\" % sum_reward)\n    #     print(\"episode done\")\n    #     # time.sleep(100)\n    \n    # env.close()\n    # print(\"Average episode reward for random strategy: {}\".format(sum_reward/NUM_EPISODES))\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/main/snake_game_custom_wrapper_cnn.py b/main/snake_game_custom_wrapper_cnn.py
+--- a/main/snake_game_custom_wrapper_cnn.py	(revision 5c302e81dba4223d81c3f4866cf0d81a24a61ecc)
++++ b/main/snake_game_custom_wrapper_cnn.py	(date 1737297836921)
+@@ -1,6 +1,6 @@
+ import math
+ 
+-import gym
++import gymnasium as gym
+ import numpy as np
+ 
+ from snake_game import SnakeGame
+@@ -19,109 +19,97 @@
+     """
+     def __init__(self, seed=0, board_size=12, silent_mode=True, limit_step=True):
+         super().__init__()
+-        # 初始化SnakeGame实例，这是实际运行游戏的内部引擎。
+         self.game = SnakeGame(seed=seed, board_size=board_size, silent_mode=silent_mode)
+-        # 重置游戏状态，准备开始新的游戏。
+         self.game.reset()
+-
+-        # 记录是否启用静默模式。
+         self.silent_mode = silent_mode
+-
+-        # 定义动作空间，贪吃蛇可以向上、左、右、下四个方向移动。
+-        self.action_space = gym.spaces.Discrete(4) # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
+-
+-        # 定义观测空间，表示游戏画面的大小和颜色深度。
++        self.action_space = gym.spaces.Discrete(4)
+         self.observation_space = gym.spaces.Box(
+             low=0, high=255,
+             shape=(84, 84, 3),
+             dtype=np.uint8
+         )
+-
+-        # 设置随机种子，用于环境的可重复性。
+         self.seed_val = 5201314
+-
+-        # 记录棋盘大小，用于计算最大步数和其他参数。
+         self.board_size = board_size
+-        # 计算棋盘的格子总数，决定蛇的最大长度。
+-        self.grid_size = board_size ** 2 # Max length of snake is board_size^2
+-        # 计算游戏初始时蛇的长度。
++        self.grid_size = board_size ** 2
+         self.init_snake_size = len(self.game.snake)
+-        # 计算蛇的最大增长长度。
+         self.max_growth = self.grid_size - self.init_snake_size
+-
+-        # 初始化游戏结束标志为False。
+         self.done = False
+-
+-        # 根据是否限制步骤，设置步数限制。
+         if limit_step:
+-            # 如果限制步骤，设置步数限制为棋盘格子数乘以4，提供充足的机会获取食物。
+-            self.step_limit = self.grid_size * 4 # More than enough steps to get the food.
++            self.step_limit = self.grid_size * 4
+         else:
+-            # 如果不限制步骤，设置极大的步数限制，几乎等于不限制。
+-            self.step_limit = 1e9 # Basically no limit.
+-        # 初始化奖励计数器，用于跟踪连续行动的次数。
++            self.step_limit = 1e9
+         self.reward_step_counter = 0
+ 
+-    def reset(self):
+-        """
+-        重置游戏环境。
+ 
+-        此方法在游戏或训练回合开始时调用，以初始化游戏状态。
+-        它不仅重置了游戏本身，还重置了一些内部变量，为新的训练回合做准备。
+-        """
+-        # 重置游戏状态
++    def reset(self, seed=None, options=None):
++        if seed is not None:
++            self.seed_val = seed
++            self.game.seed(seed)
+         self.game.reset()
+-
+-        # 初始化完成标志为False，表示游戏尚未结束
+-        self.done = False
+-        # 初始化奖励计数器，用于计算步数奖励
+-        self.reward_step_counter = 0
+-
+-        # 生成并返回初始观察值
+-        obs = self._generate_observation()
+-        return obs
++        observation = self._generate_observation()
++        info = {"snake_size": len(self.game.snake), "snake_head_pos": np.array(self.game.snake[0]), "prev_snake_head_pos": np.array(self.game.snake[1]), "food_pos": np.array(self.game.food), "food_obtained": False}
++        return observation, info
+     
+     def step(self, action):
++        """
++        执行一步游戏操作，基于给定的动作。
++
++        参数:
++            action: 代理选择执行的动作。
++
++        返回:
++            obs: 当前游戏状态的观察值。
++            reward: 执行动作获得的奖励。
++            self.done: 表示游戏是否结束。
++            info: 包含游戏状态额外信息的字典。
++        """
++        # 在游戏中执行动作并获取初始信息
+         self.done, info = self.game.step(action) # info = {"snake_size": int, "snake_head_pos": np.array, "prev_snake_head_pos": np.array, "food_pos": np.array, "food_obtained": bool}
+         obs = self._generate_observation()
+ 
++        # 初始化奖励
+         reward = 0.0
+         self.reward_step_counter += 1
+ 
+-        if info["snake_size"] == self.grid_size: # Snake fills up the entire board. Game over.
+-            reward = self.max_growth * 0.1 # Victory reward
++        # 检查蛇是否填满了整个棋盘
++        if info["snake_size"] == self.grid_size: # 蛇填满了整个棋盘。游戏结束。
++            reward = self.max_growth * 0.1 # 胜利奖励
+             self.done = True
+             if not self.silent_mode:
+                 self.game.sound_victory.play()
+             return obs, reward, self.done, info
+-        
+-        if self.reward_step_counter > self.step_limit: # Step limit reached, game over.
++
++        # 检查步数限制是否达到
++        if self.reward_step_counter > self.step_limit: # 达到步数限制，游戏结束。
+             self.reward_step_counter = 0
+             self.done = True
+-        
+-        if self.done: # Snake bumps into wall or itself. Episode is over.
+-            # Game Over penalty is based on snake size.
+-            reward = - math.pow(self.max_growth, (self.grid_size - info["snake_size"]) / self.max_growth) # (-max_growth, -1)            
++
++        # 检查蛇是否撞到墙壁或自身
++        if self.done: # 蛇撞到墙壁或自身。游戏结束。
++            # 游戏结束惩罚基于蛇的大小。
++            reward = - math.pow(self.max_growth, (self.grid_size - info["snake_size"]) / self.max_growth) # (-max_growth, -1)
+             reward = reward * 0.1
+             return obs, reward, self.done, info
+-          
+-        elif info["food_obtained"]: # Food eaten. Reward boost on snake size.
++    
++        # 检查蛇是否吃到食物
++        elif info["food_obtained"]: # 吃到食物。奖励基于蛇的大小。
+             reward = info["snake_size"] / self.grid_size
+-            self.reward_step_counter = 0 # Reset reward step counter
+-        
++            self.reward_step_counter = 0 # 重置奖励步数计数器
++
+         else:
+-            # Give a tiny reward/penalty to the agent based on whether it is heading towards the food or not.
+-            # Not competing with game over penalty or the food eaten reward.
++            # 根据蛇是否朝食物移动给予微小奖励/惩罚。
++            # 不与游戏结束惩罚或吃到食物的奖励竞争。
+             if np.linalg.norm(info["snake_head_pos"] - info["food_pos"]) < np.linalg.norm(info["prev_snake_head_pos"] - info["food_pos"]):
+                 reward = 1 / info["snake_size"]
+             else:
+                 reward = - 1 / info["snake_size"]
+             reward = reward * 0.1
+ 
+-        # max_score: 72 + 14.1 = 86.1
+-        # min_score: -14.1
++        # 最大得分: 72 + 14.1 = 86.1
++        # 最小得分: -14.1
+ 
+         return obs, reward, self.done, info
++
+     
+     def render(self):
+         self.game.render()
+@@ -131,6 +119,19 @@
+         return [seed]
+ 
+     def get_action_mask(self):
++        """
++        获取动作掩码
++
++        该方法用于生成一个动作掩码，用于表示当前状态下每个动作是否有效
++        掩码是一个NumPy数组，其中每个元素对应动作空间中的一个动作
++        如果动作在当前状态下是有效的，则对应的元素值为True，否则为False
++
++        Returns:
++            np.array: 包含动作有效性的布尔值数组 返回可以活动的方向
++        """
++        # 对于动作空间中的每个动作，检查其在当前状态下的有效性
++        # 如果动作有效，_check_action_validity方法将返回True，否则返回False
++        # 使用列表推导式生成一个包含这些布尔值的列表，并将其转换为NumPy数组
+         return np.array([[self._check_action_validity(a) for a in range(self.action_space.n)]])
+     
+     # Check if the action is against the current direction of the snake or is ending the game.
+@@ -187,26 +188,39 @@
+ 
+     # EMPTY: BLACK; SnakeBODY: GRAY; SnakeHEAD: GREEN; FOOD: RED;
+     def _generate_observation(self):
++        """
++        生成当前游戏状态的观察图像，图像大小为84x84像素。
++
++        观察图像是一个numpy数组，不同颜色代表不同的游戏元素：
++        - 蛇的身体为灰色，从头部到尾部灰度线性递减。
++        - 蛇的头部为绿色。
++        - 蛇的尾部为蓝色。
++        - 食物为红色。
++
++        图像通过重复像素放大到84x84像素，以满足神经网络的输入要求。
++        """
++        # 初始化一个黑色方块图像，大小为 game.board_size x game.board_size。
+         obs = np.zeros((self.game.board_size, self.game.board_size), dtype=np.uint8)
+ 
+-        # Set the snake body to gray with linearly decreasing intensity from head to tail.
++        # 将蛇的身体设置为灰色，灰度值从头部到尾部线性递减。
+         obs[tuple(np.transpose(self.game.snake))] = np.linspace(200, 50, len(self.game.snake), dtype=np.uint8)
+-        
+-        # Stack single layer into 3-channel-image.
++
++        # 将单通道图像扩展为三通道图像。
+         obs = np.stack((obs, obs, obs), axis=-1)
+-        
+-        # Set the snake head to green and the tail to blue
++
++        # 将蛇的头部设置为绿色，尾部设置为蓝色。
+         obs[tuple(self.game.snake[0])] = [0, 255, 0]
+         obs[tuple(self.game.snake[-1])] = [255, 0, 0]
+ 
+-        # Set the food to red
++        # 将食物设置为红色。
+         obs[self.game.food] = [0, 0, 255]
+ 
+-        # Enlarge the observation to 84x84
++        # 将图像放大到84x84像素。
+         obs = np.repeat(np.repeat(obs, 7, axis=0), 7, axis=1)
+ 
+         return obs
+ 
++
+ # Test the environment using random actions
+ # NUM_EPISODES = 100
+ # RENDER_DELAY = 0.001

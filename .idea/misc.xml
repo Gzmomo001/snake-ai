@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+<<<<<<< Updated upstream
+    <option name="sdkName" value="Python 3.9 (snake-ai)" />
+=======
+    <option name="sdkName" value="SnakeAI" />
+>>>>>>> Stashed changes
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="SnakeAI" project-jdk-type="Python SDK" />
+</project>

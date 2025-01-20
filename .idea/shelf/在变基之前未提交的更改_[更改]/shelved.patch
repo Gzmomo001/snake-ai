@@ -1,0 +1,470 @@
+Index: main/snake_game_custom_wrapper_cnn.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import math\n\nimport gym\nimport numpy as np\n\nfrom snake_game import SnakeGame\n\nclass SnakeEnv(gym.Env):\n    def __init__(self, seed=0, board_size=12, silent_mode=True, limit_step=True):\n        super().__init__()\n        self.game = SnakeGame(seed=seed, board_size=board_size, silent_mode=silent_mode)\n        self.game.reset()\n\n        self.silent_mode = silent_mode\n\n        self.action_space = gym.spaces.Discrete(4) # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN\n        \n        self.observation_space = gym.spaces.Box(\n            low=0, high=255,\n            shape=(84, 84, 3),\n            dtype=np.uint8\n        )\n\n        self.board_size = board_size\n        self.grid_size = board_size ** 2 # Max length of snake is board_size^2\n        self.init_snake_size = len(self.game.snake)\n        self.max_growth = self.grid_size - self.init_snake_size\n\n        self.done = False\n\n        if limit_step:\n            self.step_limit = self.grid_size * 4 # More than enough steps to get the food.\n        else:\n            self.step_limit = 1e9 # Basically no limit.\n        self.reward_step_counter = 0\n\n    def reset(self):\n        self.game.reset()\n\n        self.done = False\n        self.reward_step_counter = 0\n\n        obs = self._generate_observation()\n        return obs\n    \n    def step(self, action):\n        self.done, info = self.game.step(action) # info = {\"snake_size\": int, \"snake_head_pos\": np.array, \"prev_snake_head_pos\": np.array, \"food_pos\": np.array, \"food_obtained\": bool}\n        obs = self._generate_observation()\n\n        reward = 0.0\n        self.reward_step_counter += 1\n\n        if info[\"snake_size\"] == self.grid_size: # Snake fills up the entire board. Game over.\n            reward = self.max_growth * 0.1 # Victory reward\n            self.done = True\n            if not self.silent_mode:\n                self.game.sound_victory.play()\n            return obs, reward, self.done, info\n        \n        if self.reward_step_counter > self.step_limit: # Step limit reached, game over.\n            self.reward_step_counter = 0\n            self.done = True\n        \n        if self.done: # Snake bumps into wall or itself. Episode is over.\n            # Game Over penalty is based on snake size.\n            reward = - math.pow(self.max_growth, (self.grid_size - info[\"snake_size\"]) / self.max_growth) # (-max_growth, -1)            \n            reward = reward * 0.1\n            return obs, reward, self.done, info\n          \n        elif info[\"food_obtained\"]: # Food eaten. Reward boost on snake size.\n            reward = info[\"snake_size\"] / self.grid_size\n            self.reward_step_counter = 0 # Reset reward step counter\n        \n        else:\n            # Give a tiny reward/penalty to the agent based on whether it is heading towards the food or not.\n            # Not competing with game over penalty or the food eaten reward.\n            if np.linalg.norm(info[\"snake_head_pos\"] - info[\"food_pos\"]) < np.linalg.norm(info[\"prev_snake_head_pos\"] - info[\"food_pos\"]):\n                reward = 1 / info[\"snake_size\"]\n            else:\n                reward = - 1 / info[\"snake_size\"]\n            reward = reward * 0.1\n\n        # max_score: 72 + 14.1 = 86.1\n        # min_score: -14.1\n\n        return obs, reward, self.done, info\n    \n    def render(self):\n        self.game.render()\n\n    def get_action_mask(self):\n        return np.array([[self._check_action_validity(a) for a in range(self.action_space.n)]])\n    \n    # Check if the action is against the current direction of the snake or is ending the game.\n    def _check_action_validity(self, action):\n        current_direction = self.game.direction\n        snake_list = self.game.snake\n        row, col = snake_list[0]\n        if action == 0: # UP\n            if current_direction == \"DOWN\":\n                return False\n            else:\n                row -= 1\n\n        elif action == 1: # LEFT\n            if current_direction == \"RIGHT\":\n                return False\n            else:\n                col -= 1\n\n        elif action == 2: # RIGHT \n            if current_direction == \"LEFT\":\n                return False\n            else:\n                col += 1     \n        \n        elif action == 3: # DOWN \n            if current_direction == \"UP\":\n                return False\n            else:\n                row += 1\n\n        # Check if snake collided with itself or the wall. Note that the tail of the snake would be poped if the snake did not eat food in the current step.\n        if (row, col) == self.game.food:\n            game_over = (\n                (row, col) in snake_list # The snake won't pop the last cell if it ate food.\n                or row < 0\n                or row >= self.board_size\n                or col < 0\n                or col >= self.board_size\n            )\n        else:\n            game_over = (\n                (row, col) in snake_list[:-1] # The snake will pop the last cell if it did not eat food.\n                or row < 0\n                or row >= self.board_size\n                or col < 0\n                or col >= self.board_size\n            )\n\n        if game_over:\n            return False\n        else:\n            return True\n\n    # EMPTY: BLACK; SnakeBODY: GRAY; SnakeHEAD: GREEN; FOOD: RED;\n    def _generate_observation(self):\n        obs = np.zeros((self.game.board_size, self.game.board_size), dtype=np.uint8)\n\n        # Set the snake body to gray with linearly decreasing intensity from head to tail.\n        obs[tuple(np.transpose(self.game.snake))] = np.linspace(200, 50, len(self.game.snake), dtype=np.uint8)\n        \n        # Stack single layer into 3-channel-image.\n        obs = np.stack((obs, obs, obs), axis=-1)\n        \n        # Set the snake head to green and the tail to blue\n        obs[tuple(self.game.snake[0])] = [0, 255, 0]\n        obs[tuple(self.game.snake[-1])] = [255, 0, 0]\n\n        # Set the food to red\n        obs[self.game.food] = [0, 0, 255]\n\n        # Enlarge the observation to 84x84\n        obs = np.repeat(np.repeat(obs, 7, axis=0), 7, axis=1)\n\n        return obs\n\n# Test the environment using random actions\n# NUM_EPISODES = 100\n# RENDER_DELAY = 0.001\n# from matplotlib import pyplot as plt\n\n# if __name__ == \"__main__\":\n#     env = SnakeEnv(silent_mode=False)\n    \n    # # Test Init Efficiency\n    # print(MODEL_PATH_S)\n    # print(MODEL_PATH_L)\n    # num_success = 0\n    # for i in range(NUM_EPISODES):\n    #     num_success += env.reset()\n    # print(f\"Success rate: {num_success/NUM_EPISODES}\")\n\n    # sum_reward = 0\n\n    # # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN\n    # action_list = [1, 1, 1, 0, 0, 0, 2, 2, 2, 3, 3, 3]\n    \n    # for _ in range(NUM_EPISODES):\n    #     obs = env.reset()\n    #     done = False\n    #     i = 0\n    #     while not done:\n    #         plt.imshow(obs, interpolation='nearest')\n    #         plt.show()\n    #         action = env.action_space.sample()\n    #         # action = action_list[i]\n    #         i = (i + 1) % len(action_list)\n    #         obs, reward, done, info = env.step(action)\n    #         sum_reward += reward\n    #         if np.absolute(reward) > 0.001:\n    #             print(reward)\n    #         env.render()\n            \n    #         time.sleep(RENDER_DELAY)\n    #     # print(info[\"snake_length\"])\n    #     # print(info[\"food_pos\"])\n    #     # print(obs)\n    #     print(\"sum_reward: %f\" % sum_reward)\n    #     print(\"episode done\")\n    #     # time.sleep(100)\n    \n    # env.close()\n    # print(\"Average episode reward for random strategy: {}\".format(sum_reward/NUM_EPISODES))\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/main/snake_game_custom_wrapper_cnn.py b/main/snake_game_custom_wrapper_cnn.py
+--- a/main/snake_game_custom_wrapper_cnn.py	(revision a067bfc10df56a16ee601d47c5736a7fa41a1a64)
++++ b/main/snake_game_custom_wrapper_cnn.py	(date 1736946479418)
+@@ -6,33 +6,62 @@
+ from snake_game import SnakeGame
+ 
+ class SnakeEnv(gym.Env):
+-    def __init__(self, seed=0, board_size=12, silent_mode=True, limit_step=True):
+-        super().__init__()
+-        self.game = SnakeGame(seed=seed, board_size=board_size, silent_mode=silent_mode)
+-        self.game.reset()
++    class SnakeEnvironment:
++        """
++        初始化Snake环境。
++
++        参数:
++        - seed: 随机种子，用于确保环境的可重复性。
++        - board_size: 棋盘的大小，决定了游戏区域的宽度和高度。
++        - silent_mode: 是否启用静默模式，如果启用，游戏运行时不会显示图形界面。
++        - limit_step: 是否限制步骤数量，用于控制游戏的最大步数。
++
++        该环境用于模拟贪吃蛇游戏，提供与 Gym 兼容的接口。
++        """
++        def __init__(self, seed=0, board_size=12, silent_mode=True, limit_step=True):
++            super().__init__()
++            # 初始化SnakeGame实例，这是实际运行游戏的内部引擎。
++            self.game = SnakeGame(seed=seed, board_size=board_size, silent_mode=silent_mode)
++            # 重置游戏状态，准备开始新的游戏。
++            self.game.reset()
+ 
+-        self.silent_mode = silent_mode
++            # 记录是否启用静默模式。
++            self.silent_mode = silent_mode
+ 
+-        self.action_space = gym.spaces.Discrete(4) # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
+-        
+-        self.observation_space = gym.spaces.Box(
+-            low=0, high=255,
+-            shape=(84, 84, 3),
+-            dtype=np.uint8
+-        )
++            # 定义动作空间，贪吃蛇可以向上、左、右、下四个方向移动。
++            self.action_space = gym.spaces.Discrete(4) # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
++
++            # 定义观测空间，表示游戏画面的大小和颜色深度。
++            self.observation_space = gym.spaces.Box(
++                low=0, high=255,
++                shape=(84, 84, 3),
++                dtype=np.uint8
++            )
+ 
+-        self.board_size = board_size
+-        self.grid_size = board_size ** 2 # Max length of snake is board_size^2
+-        self.init_snake_size = len(self.game.snake)
+-        self.max_growth = self.grid_size - self.init_snake_size
++            # 设置随机种子，用于环境的可重复性。
++            self.seed_val = 5201314
++
++            # 记录棋盘大小，用于计算最大步数和其他参数。
++            self.board_size = board_size
++            # 计算棋盘的格子总数，决定蛇的最大长度。
++            self.grid_size = board_size ** 2 # Max length of snake is board_size^2
++            # 计算游戏初始时蛇的长度。
++            self.init_snake_size = len(self.game.snake)
++            # 计算蛇的最大增长长度。
++            self.max_growth = self.grid_size - self.init_snake_size
+ 
+-        self.done = False
++            # 初始化游戏结束标志为False。
++            self.done = False
+ 
+-        if limit_step:
+-            self.step_limit = self.grid_size * 4 # More than enough steps to get the food.
+-        else:
+-            self.step_limit = 1e9 # Basically no limit.
+-        self.reward_step_counter = 0
++            # 根据是否限制步骤，设置步数限制。
++            if limit_step:
++                # 如果限制步骤，设置步数限制为棋盘格子数乘以4，提供充足的机会获取食物。
++                self.step_limit = self.grid_size * 4 # More than enough steps to get the food.
++            else:
++                # 如果不限制步骤，设置极大的步数限制，几乎等于不限制。
++                self.step_limit = 1e9 # Basically no limit.
++            # 初始化奖励计数器，用于跟踪连续行动的次数。
++            self.reward_step_counter = 0
+ 
+     def reset(self):
+         self.game.reset()
+@@ -88,6 +117,10 @@
+     def render(self):
+         self.game.render()
+ 
++    def seed(self, seed=None):
++        self.seed_val = seed
++        return [seed]
++
+     def get_action_mask(self):
+         return np.array([[self._check_action_validity(a) for a in range(self.action_space.n)]])
+     
+Index: main/snake_game.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import os\nimport sys\nimport random\n\nimport numpy as np\n\nos.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'\nimport pygame\nfrom pygame import mixer\n\nclass SnakeGame:\n    def __init__(self, seed=0, board_size=12, silent_mode=True):\n        self.board_size = board_size\n        self.grid_size = self.board_size ** 2\n        self.cell_size = 40\n        self.width = self.height = self.board_size * self.cell_size\n\n        self.border_size = 20\n        self.display_width = self.width + 2 * self.border_size\n        self.display_height = self.height + 2 * self.border_size + 40\n\n        self.silent_mode = silent_mode\n        if not silent_mode:\n            pygame.init()\n            pygame.display.set_caption(\"Snake Game\")\n            self.screen = pygame.display.set_mode((self.display_width, self.display_height))\n            self.font = pygame.font.Font(None, 36)\n\n            # Load sound effects\n            mixer.init()\n            self.sound_eat = mixer.Sound(\"sound/eat.wav\")\n            self.sound_game_over = mixer.Sound(\"sound/game_over.wav\")\n            self.sound_victory = mixer.Sound(\"sound/victory.wav\")\n        else:\n            self.screen = None\n            self.font = None\n\n        self.snake = None\n        self.non_snake = None\n\n        self.direction = None\n        self.score = 0\n        self.food = None\n        self.seed_value = seed\n\n        random.seed(seed) # Set random seed.\n        \n        self.reset()\n\n    def reset(self):\n        self.snake = [(self.board_size // 2 + i, self.board_size // 2) for i in range(1, -2, -1)] # Initialize the snake with three cells in (row, column) format.\n        self.non_snake = set([(row, col) for row in range(self.board_size) for col in range(self.board_size) if (row, col) not in self.snake]) # Initialize the non-snake cells.\n        self.direction = \"DOWN\" # Snake starts downward in each round\n        self.food = self._generate_food()\n        self.score = 0\n\n    def step(self, action):\n        self._update_direction(action) # Update direction based on action.\n\n        # Move snake based on current action.\n        row, col = self.snake[0]\n        if self.direction == \"UP\":\n            row -= 1\n        elif self.direction == \"DOWN\":\n            row += 1\n        elif self.direction == \"LEFT\":\n            col -= 1\n        elif self.direction == \"RIGHT\":\n            col += 1\n\n        # Check if snake eats food.\n        if (row, col) == self.food: # If snake eats food, it won't pop the last cell. The food grid will be taken by snake later, no need to update board vacancy matrix.\n            food_obtained = True\n            self.score += 10 # Add 10 points to the score when food is eaten.\n            if not self.silent_mode:\n                self.sound_eat.play()\n        else:\n            food_obtained = False\n            self.non_snake.add(self.snake.pop()) # Pop the last cell of the snake and add it to the non-snake set.\n\n        # Check if snake collided with itself or the wall\n        done = (\n            (row, col) in self.snake\n            or row < 0\n            or row >= self.board_size\n            or col < 0\n            or col >= self.board_size\n        )\n\n        if not done:\n            self.snake.insert(0, (row, col))\n            self.non_snake.remove((row, col))\n\n        else: # If game is over and the game is not in silent mode, play game over sound effect.\n            if not self.silent_mode:\n                if len(self.snake) < self.grid_size:\n                    self.sound_game_over.play()\n                else:\n                    self.sound_victory.play()\n\n        # Add new food after snake movement completes.\n        if food_obtained:\n            self.food = self._generate_food()\n\n        info ={\n            \"snake_size\": len(self.snake),\n            \"snake_head_pos\": np.array(self.snake[0]),\n            \"prev_snake_head_pos\": np.array(self.snake[1]),\n            \"food_pos\": np.array(self.food),\n            \"food_obtained\": food_obtained\n        }\n\n        return done, info\n\n    # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN\n    def _update_direction(self, action):\n        if action == 0:\n            if self.direction != \"DOWN\":\n                self.direction = \"UP\"\n        elif action == 1:\n            if self.direction != \"RIGHT\":\n                self.direction = \"LEFT\"\n        elif action == 2:\n            if self.direction != \"LEFT\":\n                self.direction = \"RIGHT\"\n        elif action == 3:\n            if self.direction != \"UP\":\n                self.direction = \"DOWN\"\n        # Swich Case is supported in Python 3.10+\n\n    def _generate_food(self):\n        if len(self.non_snake) > 0:\n            food = random.sample(self.non_snake, 1)[0]\n        else: # If the snake occupies the entire board, no need to generate new food and just default to (0, 0).\n            food = (0, 0)\n        return food\n    \n    def draw_score(self):\n        score_text = self.font.render(f\"Score: {self.score}\", True, (255, 255, 255))\n        self.screen.blit(score_text, (self.border_size, self.height + 2 * self.border_size))\n    \n    def draw_welcome_screen(self):\n        title_text = self.font.render(\"SNAKE GAME\", True, (255, 255, 255))\n        start_button_text = \"START\"\n\n        self.screen.fill((0, 0, 0))\n        self.screen.blit(title_text, (self.display_width // 2 - title_text.get_width() // 2, self.display_height // 4))\n        self.draw_button_text(start_button_text, (self.display_width // 2, self.display_height // 2))\n        pygame.display.flip()\n\n    def draw_game_over_screen(self):\n        game_over_text = self.font.render(\"GAME OVER\", True, (255, 255, 255))\n        final_score_text = self.font.render(f\"SCORE: {self.score}\", True, (255, 255, 255))\n        retry_button_text = \"RETRY\"\n\n        self.screen.fill((0, 0, 0))\n        self.screen.blit(game_over_text, (self.display_width // 2 - game_over_text.get_width() // 2, self.display_height // 4))\n        self.screen.blit(final_score_text, (self.display_width // 2 - final_score_text.get_width() // 2, self.display_height // 4 + final_score_text.get_height() + 10))\n        self.draw_button_text(retry_button_text, (self.display_width // 2, self.display_height // 2))          \n        pygame.display.flip()\n\n    def draw_button_text(self, button_text_str, pos, hover_color=(255, 255, 255), normal_color=(100, 100, 100)):\n        mouse_pos = pygame.mouse.get_pos()\n        button_text = self.font.render(button_text_str, True, normal_color)\n        text_rect = button_text.get_rect(center=pos)\n        \n        if text_rect.collidepoint(mouse_pos):\n            colored_text = self.font.render(button_text_str, True, hover_color)\n        else:\n            colored_text = self.font.render(button_text_str, True, normal_color)\n        \n        self.screen.blit(colored_text, text_rect)\n    \n    def draw_countdown(self, number):\n        countdown_text = self.font.render(str(number), True, (255, 255, 255))\n        self.screen.blit(countdown_text, (self.display_width // 2 - countdown_text.get_width() // 2, self.display_height // 2 - countdown_text.get_height() // 2))\n        pygame.display.flip()\n\n    def is_mouse_on_button(self, button_text):\n        mouse_pos = pygame.mouse.get_pos()\n        text_rect = button_text.get_rect(\n            center=(\n                self.display_width // 2,\n                self.display_height // 2,\n            )\n        )\n        return text_rect.collidepoint(mouse_pos)\n\n    def render(self):\n        self.screen.fill((0, 0, 0))\n\n        # Draw border\n        pygame.draw.rect(self.screen, (255, 255, 255), (self.border_size - 2, self.border_size - 2, self.width + 4, self.height + 4), 2)\n\n        # Draw snake\n        self.draw_snake()\n        \n        # Draw food\n        if len(self.snake) < self.grid_size: # If the snake occupies the entire board, don't draw food.\n            r, c = self.food\n            pygame.draw.rect(self.screen, (255, 0, 0), (c * self.cell_size + self.border_size, r * self.cell_size + self.border_size, self.cell_size, self.cell_size))\n\n        # Draw score\n        self.draw_score()\n\n        pygame.display.flip()\n\n        for event in pygame.event.get():\n            if event.type == pygame.QUIT:\n                pygame.quit()\n                sys.exit()\n\n    def draw_snake(self):\n        # Draw the head\n        head_r, head_c = self.snake[0]\n        head_x = head_c * self.cell_size + self.border_size\n        head_y = head_r * self.cell_size + self.border_size\n\n        # Draw the head (Blue)\n        pygame.draw.polygon(self.screen, (100, 100, 255), [\n            (head_x + self.cell_size // 2, head_y),\n            (head_x + self.cell_size, head_y + self.cell_size // 2),\n            (head_x + self.cell_size // 2, head_y + self.cell_size),\n            (head_x, head_y + self.cell_size // 2)\n        ])\n\n        eye_size = 3\n        eye_offset = self.cell_size // 4\n        pygame.draw.circle(self.screen, (255, 255, 255), (head_x + eye_offset, head_y + eye_offset), eye_size)\n        pygame.draw.circle(self.screen, (255, 255, 255), (head_x + self.cell_size - eye_offset, head_y + eye_offset), eye_size)\n\n        # Draw the body (color gradient)\n        color_list = np.linspace(255, 100, len(self.snake), dtype=np.uint8)\n        i = 1\n        for r, c in self.snake[1:]:\n            body_x = c * self.cell_size + self.border_size\n            body_y = r * self.cell_size + self.border_size\n            body_width = self.cell_size\n            body_height = self.cell_size\n            body_radius = 5\n            pygame.draw.rect(self.screen, (0, color_list[i], 0),\n                            (body_x, body_y, body_width, body_height), border_radius=body_radius)\n            i += 1\n        pygame.draw.rect(self.screen, (255, 100, 100),\n                            (body_x, body_y, body_width, body_height), border_radius=body_radius)\n        \n\nif __name__ == \"__main__\":\n    import time\n\n    seed = random.randint(0, 1e9)\n    game = SnakeGame(seed=seed, silent_mode=False)\n    pygame.init()\n    game.screen = pygame.display.set_mode((game.display_width, game.display_height))\n    pygame.display.set_caption(\"Snake Game\")\n    game.font = pygame.font.Font(None, 36)\n    \n\n    game_state = \"welcome\"\n\n    # Two hidden button for start and retry click detection\n    start_button = game.font.render(\"START\", True, (0, 0, 0))\n    retry_button = game.font.render(\"RETRY\", True, (0, 0, 0))\n\n    update_interval = 0.15\n    start_time = time.time()\n    action = -1\n\n    while True:\n        \n        for event in pygame.event.get():\n\n            if game_state == \"running\":\n                if event.type == pygame.KEYDOWN:\n                    if event.key == pygame.K_UP:\n                        action = 0\n                    elif event.key == pygame.K_DOWN:\n                        action = 3\n                    elif event.key == pygame.K_LEFT:\n                        action = 1\n                    elif event.key == pygame.K_RIGHT:\n                        action = 2\n\n            if event.type == pygame.QUIT:\n                pygame.quit()\n                sys.exit()\n\n            if game_state == \"welcome\" and event.type == pygame.MOUSEBUTTONDOWN:\n                if game.is_mouse_on_button(start_button):\n                    for i in range(3, 0, -1):\n                        game.screen.fill((0, 0, 0))\n                        game.draw_countdown(i)\n                        game.sound_eat.play()\n                        pygame.time.wait(1000)\n                    action = -1  # Reset action variable when starting a new game\n                    game_state = \"running\"\n\n            if game_state == \"game_over\" and event.type == pygame.MOUSEBUTTONDOWN:\n                if game.is_mouse_on_button(retry_button):\n                    for i in range(3, 0, -1):\n                        game.screen.fill((0, 0, 0))\n                        game.draw_countdown(i)\n                        game.sound_eat.play()\n                        pygame.time.wait(1000)\n                    game.reset()\n                    action = -1  # Reset action variable when starting a new game\n                    game_state = \"running\"\n        \n        if game_state == \"welcome\":\n            game.draw_welcome_screen()\n\n        if game_state == \"game_over\":\n            game.draw_game_over_screen()\n\n        if game_state == \"running\":\n            if time.time() - start_time >= update_interval:\n                done, _ = game.step(action)\n                game.render()\n                start_time = time.time()\n\n                if done:\n                    game_state = \"game_over\"\n        \n        pygame.time.wait(1)\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/main/snake_game.py b/main/snake_game.py
+--- a/main/snake_game.py	(revision a067bfc10df56a16ee601d47c5736a7fa41a1a64)
++++ b/main/snake_game.py	(date 1736930936068)
+@@ -1,4 +1,6 @@
+ import os
++os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"  # 隐藏Pygame欢迎信息
++os.environ['SDL_AUDIODRIVER'] = 'dummy'  # 禁用音频
+ import sys
+ import random
+ 
+@@ -10,17 +12,28 @@
+ 
+ class SnakeGame:
+     def __init__(self, seed=0, board_size=12, silent_mode=True):
++        """
++        Initializes the Snake game environment.
++
++        :param seed: Random seed for reproducibility.
++        :param board_size: Size of the game board, default is 12x12.
++        :param silent_mode: If True, runs the game without graphics or sound.
++        """
++        # Initialize game board parameters
+         self.board_size = board_size
+         self.grid_size = self.board_size ** 2
+         self.cell_size = 40
+         self.width = self.height = self.board_size * self.cell_size
+ 
++        # Initialize display border parameters
+         self.border_size = 20
+         self.display_width = self.width + 2 * self.border_size
+         self.display_height = self.height + 2 * self.border_size + 40
+ 
++        # Check if silent mode is enabled
+         self.silent_mode = silent_mode
+         if not silent_mode:
++            # Initialize Pygame and create game window
+             pygame.init()
+             pygame.display.set_caption("Snake Game")
+             self.screen = pygame.display.set_mode((self.display_width, self.display_height))
+@@ -32,9 +45,11 @@
+             self.sound_game_over = mixer.Sound("sound/game_over.wav")
+             self.sound_victory = mixer.Sound("sound/victory.wav")
+         else:
++            # If silent mode is enabled, do not initialize display and font
+             self.screen = None
+             self.font = None
+ 
++        # Initialize game state variables
+         self.snake = None
+         self.non_snake = None
+ 
+@@ -43,19 +58,44 @@
+         self.food = None
+         self.seed_value = seed
+ 
+-        random.seed(seed) # Set random seed.
+-        
++        # Set random seed
++        random.seed(seed)
++
++        # Reset game state
+         self.reset()
+ 
+     def reset(self):
+-        self.snake = [(self.board_size // 2 + i, self.board_size // 2) for i in range(1, -2, -1)] # Initialize the snake with three cells in (row, column) format.
+-        self.non_snake = set([(row, col) for row in range(self.board_size) for col in range(self.board_size) if (row, col) not in self.snake]) # Initialize the non-snake cells.
+-        self.direction = "DOWN" # Snake starts downward in each round
++        """
++        Resets the game state, including the snake's initial position, direction, food position, and score.
++        """
++        # Initialize the snake with three cells in (row, column) format, starting in the middle of the board and extending upwards
++        self.snake = [(self.board_size // 2 + i, self.board_size // 2) for i in range(1, -2, -1)]
++
++        # Initialize the non-snake cells, which are all board cells excluding the snake's initial position
++        self.non_snake = set([(row, col) for row in range(self.board_size) for col in range(self.board_size) if (row, col) not in self.snake])
++
++        # Snake starts downward in each round
++        self.direction = "DOWN"
++
++        # Generate the initial food position
+         self.food = self._generate_food()
++
++        # Reset the score to 0
+         self.score = 0
+ 
+     def step(self, action):
+-        self._update_direction(action) # Update direction based on action.
++        """
++        Perform one step of the game based on the given action.
++
++        Parameters:
++        - action: The action to be performed, which determines the new direction of the snake.
++
++        Returns:
++        - done: A boolean indicating whether the game is over.
++        - info: A dictionary containing information about the game state, including snake size, snake head position, previous snake head position, food position, and whether food was obtained.
++        """
++        # Update direction based on action.
++        self._update_direction(action)
+ 
+         # Move snake based on current action.
+         row, col = self.snake[0]
+@@ -102,6 +142,7 @@
+         if food_obtained:
+             self.food = self._generate_food()
+ 
++        # Prepare information about the game state.
+         info ={
+             "snake_size": len(self.snake),
+             "snake_head_pos": np.array(self.snake[0]),
+@@ -110,8 +151,10 @@
+             "food_obtained": food_obtained
+         }
+ 
++        # Return whether the game is over and the game state information.
+         return done, info
+ 
++
+     # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
+     def _update_direction(self, action):
+         if action == 0:
+Index: main/test_cnn.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import time\nimport random\n\nimport torch\nfrom sb3_contrib import MaskablePPO\n\nfrom snake_game_custom_wrapper_cnn import SnakeEnv\n\nif torch.backends.mps.is_available():\n    MODEL_PATH = r\"trained_models_cnn_mps/ppo_snake_final\"\nelse:\n    MODEL_PATH = r\"trained_models_cnn/ppo_snake_final\"\n\nNUM_EPISODE = 10\n\nRENDER = True\nFRAME_DELAY = 0.05 # 0.01 fast, 0.05 slow\nROUND_DELAY = 5\n\nseed = random.randint(0, 1e9)\nprint(f\"Using seed = {seed} for testing.\")\n\nif RENDER:\n    env = SnakeEnv(seed=seed, limit_step=False, silent_mode=False)\nelse:\n    env = SnakeEnv(seed=seed, limit_step=False, silent_mode=True)\n\n# Load the trained model\nmodel = MaskablePPO.load(MODEL_PATH)\n\ntotal_reward = 0\ntotal_score = 0\nmin_score = 1e9\nmax_score = 0\n\nfor episode in range(NUM_EPISODE):\n    obs = env.reset()\n    episode_reward = 0\n    done = False\n    \n    num_step = 0\n    info = None\n\n    sum_step_reward = 0\n\n    retry_limit = 9\n    print(f\"=================== Episode {episode + 1} ==================\")\n    while not done:\n        action, _ = model.predict(obs, action_masks=env.get_action_mask())\n        prev_mask = env.get_action_mask()\n        prev_direction = env.game.direction\n        num_step += 1\n        obs, reward, done, info = env.step(action)\n\n        if done:\n            if info[\"snake_size\"] == env.game.grid_size:\n                print(f\"You are BREATHTAKING! Victory reward: {reward:.4f}.\")\n            else:\n                last_action = [\"UP\", \"LEFT\", \"RIGHT\", \"DOWN\"][action]\n                print(f\"Gameover Penalty: {reward:.4f}. Last action: {last_action}\")\n\n        elif info[\"food_obtained\"]:\n            print(f\"Food obtained at step {num_step:04d}. Food Reward: {reward:.4f}. Step Reward: {sum_step_reward:.4f}\")\n            sum_step_reward = 0 \n\n        else:\n            sum_step_reward += reward\n            \n        episode_reward += reward\n        if RENDER:\n            env.render()\n            time.sleep(FRAME_DELAY)\n\n    episode_score = env.game.score\n    if episode_score < min_score:\n        min_score = episode_score\n    if episode_score > max_score:\n        max_score = episode_score\n    \n    snake_size = info[\"snake_size\"] + 1\n    print(f\"Episode {episode + 1}: Reward Sum: {episode_reward:.4f}, Score: {episode_score}, Total Steps: {num_step}, Snake Size: {snake_size}\")\n    total_reward += episode_reward\n    total_score += env.game.score\n    if RENDER:\n        time.sleep(ROUND_DELAY)\n\nenv.close()\nprint(f\"=================== Summary ==================\")\nprint(f\"Average Score: {total_score / NUM_EPISODE}, Min Score: {min_score}, Max Score: {max_score}, Average reward: {total_reward / NUM_EPISODE}\")\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/main/test_cnn.py b/main/test_cnn.py
+--- a/main/test_cnn.py	(revision a067bfc10df56a16ee601d47c5736a7fa41a1a64)
++++ b/main/test_cnn.py	(date 1736945649216)
+@@ -6,20 +6,27 @@
+ 
+ from snake_game_custom_wrapper_cnn import SnakeEnv
+ 
++# Determine the model path based on the availability of MPS support
+ if torch.backends.mps.is_available():
+     MODEL_PATH = r"trained_models_cnn_mps/ppo_snake_final"
+ else:
+     MODEL_PATH = r"trained_models_cnn/ppo_snake_final"
+ 
++# Set the number of episodes for testing
+ NUM_EPISODE = 10
+ 
++# Control whether to render the game environment
+ RENDER = True
++# Set the delay time for each frame
+ FRAME_DELAY = 0.05 # 0.01 fast, 0.05 slow
++# Set the delay time between rounds
+ ROUND_DELAY = 5
+ 
++# Generate a random seed for testing
+ seed = random.randint(0, 1e9)
+ print(f"Using seed = {seed} for testing.")
+ 
++# Initialize the game environment based on whether rendering is needed
+ if RENDER:
+     env = SnakeEnv(seed=seed, limit_step=False, silent_mode=False)
+ else:
+@@ -28,16 +35,19 @@
+ # Load the trained model
+ model = MaskablePPO.load(MODEL_PATH)
+ 
++# Initialize statistics for tracking rewards and scores
+ total_reward = 0
+ total_score = 0
+ min_score = 1e9
+ max_score = 0
+ 
++# Run multiple episodes for testing
+ for episode in range(NUM_EPISODE):
++    # Reset the environment at the beginning of each episode
+     obs = env.reset()
+     episode_reward = 0
+     done = False
+-    
++
+     num_step = 0
+     info = None
+ 
+@@ -45,13 +55,16 @@
+ 
+     retry_limit = 9
+     print(f"=================== Episode {episode + 1} ==================")
++    # Perform actions until the episode ends
+     while not done:
++        # Predict the next action using the model
+         action, _ = model.predict(obs, action_masks=env.get_action_mask())
+         prev_mask = env.get_action_mask()
+         prev_direction = env.game.direction
+         num_step += 1
+         obs, reward, done, info = env.step(action)
+ 
++        # Handle different situations based on the game state
+         if done:
+             if info["snake_size"] == env.game.grid_size:
+                 print(f"You are BREATHTAKING! Victory reward: {reward:.4f}.")
+Index: requirements.txt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>gym==0.21.0\nstable-baselines3==1.8.0\nsb3-contrib==1.8.0\npygame==2.3.0
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/requirements.txt b/requirements.txt
+--- a/requirements.txt	(revision a067bfc10df56a16ee601d47c5736a7fa41a1a64)
++++ b/requirements.txt	(date 1736828079016)
+@@ -1,4 +1,5 @@
+-gym==0.21.0
+-stable-baselines3==1.8.0
++gym~=0.26.1
++stable-baselines3~=2.3.2
+ sb3-contrib==1.8.0
+-pygame==2.3.0
+\ No newline at end of file
++pygame==2.3.0
++numpy~=1.24.4
+\ No newline at end of file
+Index: .idea/.gitignore
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/.gitignore b/.idea/.gitignore
+new file mode 100644
+--- /dev/null	(date 1736767203590)
++++ b/.idea/.gitignore	(date 1736767203590)
+@@ -0,0 +1,3 @@
++# 默认忽略的文件
++/shelf/
++/workspace.xml
+Index: .idea/git_toolbox_blame.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/git_toolbox_blame.xml b/.idea/git_toolbox_blame.xml
+new file mode 100644
+--- /dev/null	(date 1736773533066)
++++ b/.idea/git_toolbox_blame.xml	(date 1736773533066)
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="GitToolBoxBlameSettings">
++    <option name="version" value="2" />
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/modules.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/modules.xml b/.idea/modules.xml
+new file mode 100644
+--- /dev/null	(date 1736767239375)
++++ b/.idea/modules.xml	(date 1736767239375)
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="ProjectModuleManager">
++    <modules>
++      <module fileurl="file://$PROJECT_DIR$/.idea/snake-ai.iml" filepath="$PROJECT_DIR$/.idea/snake-ai.iml" />
++    </modules>
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/inspectionProfiles/profiles_settings.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/inspectionProfiles/profiles_settings.xml b/.idea/inspectionProfiles/profiles_settings.xml
+new file mode 100644
+--- /dev/null	(date 1736767239380)
++++ b/.idea/inspectionProfiles/profiles_settings.xml	(date 1736767239380)
+@@ -0,0 +1,6 @@
++<component name="InspectionProjectProfileManager">
++  <settings>
++    <option name="USE_PROJECT_PROFILE" value="false" />
++    <version value="1.0" />
++  </settings>
++</component>
+\ No newline at end of file
+Index: .idea/misc.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/misc.xml b/.idea/misc.xml
+new file mode 100644
+--- /dev/null	(date 1736842416991)
++++ b/.idea/misc.xml	(date 1736842416991)
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="Black">
++    <option name="sdkName" value="Python 3.9 (snake-ai)" />
++  </component>
++  <component name="ProjectRootManager" version="2" project-jdk-name="SnakeAI" project-jdk-type="Python SDK" />
++</project>
+\ No newline at end of file
+Index: .idea/vcs.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/vcs.xml b/.idea/vcs.xml
+new file mode 100644
+--- /dev/null	(date 1736767239383)
++++ b/.idea/vcs.xml	(date 1736767239383)
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="VcsDirectoryMappings">
++    <mapping directory="" vcs="Git" />
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/inspectionProfiles/Project_Default.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/inspectionProfiles/Project_Default.xml b/.idea/inspectionProfiles/Project_Default.xml
+new file mode 100644
+--- /dev/null	(date 1736767239321)
++++ b/.idea/inspectionProfiles/Project_Default.xml	(date 1736767239321)
+@@ -0,0 +1,6 @@
++<component name="InspectionProjectProfileManager">
++  <profile version="1.0">
++    <option name="myName" value="Project Default" />
++    <inspection_tool class="LanguageDetectionInspection" enabled="false" level="WARNING" enabled_by_default="false" />
++  </profile>
++</component>
+\ No newline at end of file
+Index: .idea/snake-ai.iml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/snake-ai.iml b/.idea/snake-ai.iml
+new file mode 100644
+--- /dev/null	(date 1736842416987)
++++ b/.idea/snake-ai.iml	(date 1736842416987)
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<module type="PYTHON_MODULE" version="4">
++  <component name="NewModuleRootManager">
++    <content url="file://$MODULE_DIR$">
++      <excludeFolder url="file://$MODULE_DIR$/.venv" />
++    </content>
++    <orderEntry type="jdk" jdkName="SnakeAI" jdkType="Python SDK" />
++    <orderEntry type="sourceFolder" forTests="false" />
++  </component>
++</module>
+\ No newline at end of file
